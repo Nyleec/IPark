@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>OpenStreetMap with Location</title>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    #map { height: 500px; width: 100%; }
+    button { margin: 5px; padding: 10px 20px; }
+  </style>
+</head>
+<body>
+  <h2>My Location Map</h2>
+  <div id="map"></div>
+  <button id="sendLocation">Send My Location</button>
+  <button id="removeLocation">Remove My Location</button>
+  <button id="zoomLocation">Zoom to My Location</button>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    // --- Generate or retrieve unique ID ---
+    function getUserId() {
+      let id = localStorage.getItem("userId");
+      if (!id) {
+        id = crypto.randomUUID();
+        localStorage.setItem("userId", id);
+      }
+      return id;
+    }
+    const userId = getUserId();
+
+    // Initialize map
+    var map = L.map('map').setView([0, 0], 2);
+
+    // Add OpenStreetMap tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    let userMarker = null;
+    let userCoords = null;
+    let otherMarkers = [];
+
+    // Get user location
+    navigator.geolocation.getCurrentPosition(pos => {
+      userCoords = [pos.coords.latitude, pos.coords.longitude];
+      map.setView(userCoords, 13);
+
+      userMarker = L.marker(userCoords).addTo(map)
+        .bindPopup("You are here").openPopup();
+    });
+
+    // --- Send location ---
+    document.getElementById("sendLocation").addEventListener("click", () => {
+      if (!userCoords) return alert("Location not found yet!");
+
+      fetch("/save-location", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: userId,
+          latitude: userCoords[0],
+          longitude: userCoords[1]
+        })
+      })
+      .then(res => res.json())
+      .then(() => console.log("Location saved"))
+      .catch(err => console.error(err));
+    });
+
+    // --- Remove location ---
+    document.getElementById("removeLocation").addEventListener("click", () => {
+      fetch("/remove-location", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: userId })
+      })
+      .then(res => res.json())
+      .then(() => console.log("Location removed"))
+      .catch(err => console.error(err));
+    });
+
+    // --- Zoom to user's current location ---
+    document.getElementById("zoomLocation").addEventListener("click", () => {
+      if (!userCoords) return alert("Location not found yet!");
+      map.setView(userCoords, 15); // zoom level 15 = close-up
+    });
+
+    // --- Auto-refresh all locations every 5 seconds ---
+    function refreshLocations() {
+      fetch("/get-locations")
+        .then(res => res.json())
+        .then(locations => {
+          // Remove old markers first
+          otherMarkers.forEach(m => map.removeLayer(m));
+          otherMarkers = [];
+
+          locations.forEach(loc => {
+            // Skip the current user's marker since we already have it
+            if (loc.id !== userId) {
+              const marker = L.marker([loc.latitude, loc.longitude])
+                .addTo(map)
+                .bindPopup(`User: ${loc.id}<br>Time: ${loc.timestamp}`);
+              otherMarkers.push(marker);
+            }
+          });
+        })
+        .catch(err => console.error(err));
+    }
+
+    setInterval(refreshLocations, 5000); // refresh every 5 seconds
+  </script>
+</body>
+</html>
